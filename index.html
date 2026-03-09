@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Speech Project Finder</title>
+  <title>スピーチプロジェクト提案</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f5f7fb; color: #1f2937; }
     .container { max-width: 920px; margin: 2rem auto; background: #fff; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); padding: 1.5rem; }
@@ -17,12 +17,14 @@
     .project { border: 1px solid #dbeafe; background: #eff6ff; border-radius: 10px; padding: 0.8rem; margin: 0.6rem 0; }
     .error { color: #b91c1c; font-weight: 600; }
     .muted { color: #4b5563; }
+    .prompt-box { margin-top: 0.6rem; padding: 0.7rem; background: #fff; border: 1px solid #bfdbfe; border-radius: 8px; white-space: pre-wrap; }
+    .small-btn { background: #1d4ed8; margin-top: 0.4rem; }
   </style>
 </head>
 <body>
   <main class="container">
-    <h1>スピーチ内容に合わせたプロジェクト提案</h1>
-    <p class="muted">projectlist.md を相対パスで読み込み、Path選択 + Yes/No 20問で最適な3つを提案します。</p>
+    <h1>スピーチプロジェクト提案</h1>
+    <p class="muted">Path選択 + Yes/No 20問で最適な3つを提案します。</p>
 
     <div class="row">
       <label for="pathSelect"><strong>1) Path を選択</strong></label><br />
@@ -92,12 +94,15 @@
 
     function getAnswers() {
       const tags = [];
+      const details = [];
       for (let i = 0; i < questions.length; i++) {
         const selected = document.querySelector(`input[name="q${i}"]:checked`);
         if (!selected) return null;
-        tags.push(...(selected.value === "yes" ? questions[i].yes : questions[i].no));
+        const isYes = selected.value === "yes";
+        tags.push(...(isYes ? questions[i].yes : questions[i].no));
+        details.push({ index: i + 1, question: questions[i].text, answer: isYes ? "Yes" : "No" });
       }
-      return tags;
+      return { tags, details };
     }
 
     function recommend(rows, path, tags) {
@@ -111,6 +116,23 @@
         });
         return { ...item, score };
       }).sort((a, b) => b.score - a.score).slice(0, 3);
+    }
+
+
+    function buildIdeaPrompt(item, answerDetails) {
+      const answersText = answerDetails.map(a => `Q${a.index}. ${a.question} -> ${a.answer}`).join("\n");
+      return [
+        "あなたはスピーチコーチです。以下の情報をもとに、このプロジェクトに合うスピーチアイデアを5案ください。",
+        "各案には『タイトル』『ねらい』『導入フック』『主な構成(3点)』を含めてください。",
+        "",
+        `Project: ${item.project}`,
+        `Path: ${item.path}`,
+        `Purpose (EN): ${item.purpose}`,
+        `Purpose (JP): ${item.purposeJp || "（未設定）"}`,
+        "",
+        "20問の回答:",
+        answersText
+      ].join("\n");
     }
 
     async function init() {
@@ -142,18 +164,35 @@
         validation.textContent = "";
         results.innerHTML = "";
         if (!pathSelect.value) return void (validation.textContent = "Pathを選択してください。");
-        const answers = getAnswers();
-        if (!answers) return void (validation.textContent = "20問すべてに回答してください。");
+        const answerData = getAnswers();
+        if (!answerData) return void (validation.textContent = "20問すべてに回答してください。");
 
-        const top3 = recommend(rows, pathSelect.value, answers);
+        const top3 = recommend(rows, pathSelect.value, answerData.tags);
         results.innerHTML = "<h2>提案結果（上位3件）</h2>";
         top3.forEach((item, i) => {
           const card = document.createElement("div");
           card.className = "project";
+          const promptId = `prompt-${i}`;
+          const promptText = buildIdeaPrompt(item, answerData.details);
           card.innerHTML = `<strong>${i + 1}. ${item.project}</strong><br><small>Path: ${item.path}</small>
             <p><strong>Purpose (EN):</strong> ${item.purpose}</p>
             <p><strong>Purpose (JP):</strong> ${item.purposeJp || "（未設定）"}</p>
-            <small>一致スコア: ${item.score}</small>`;
+            <small>一致スコア: ${item.score}</small><br>
+            <button type="button" class="small-btn" data-prompt-target="${promptId}">このプロジェクトのAIプロンプトを表示</button>
+            <div id="${promptId}" class="prompt-box" hidden></div>`;
+          const btn = card.querySelector('[data-prompt-target]');
+          const box = card.querySelector(`#${promptId}`);
+          btn.addEventListener('click', () => {
+            const isHidden = box.hasAttribute('hidden');
+            if (isHidden) {
+              box.textContent = promptText;
+              box.removeAttribute('hidden');
+              btn.textContent = 'AIプロンプトを隠す';
+            } else {
+              box.setAttribute('hidden', '');
+              btn.textContent = 'このプロジェクトのAIプロンプトを表示';
+            }
+          });
           results.appendChild(card);
         });
       });
