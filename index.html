@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Speech Project Finder</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      background: #f5f7fb;
+      color: #1f2937;
+    }
+    .container {
+      max-width: 900px;
+      margin: 2rem auto;
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+      padding: 1.5rem;
+    }
+    h1 { margin-top: 0; font-size: 1.8rem; }
+    .muted { color: #4b5563; }
+    .row { margin: 1rem 0; }
+    select, button {
+      font-size: 1rem;
+      padding: 0.6rem 0.8rem;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      cursor: pointer;
+      margin-top: 1rem;
+    }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    .question {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 1rem;
+      margin: 0.8rem 0;
+      background: #f9fafb;
+    }
+    .choices { display: grid; gap: 0.4rem; margin-top: 0.6rem; }
+    label { cursor: pointer; }
+    .results {
+      margin-top: 1.5rem;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 1rem;
+    }
+    .project {
+      border: 1px solid #dbeafe;
+      background: #eff6ff;
+      border-radius: 10px;
+      padding: 0.8rem;
+      margin: 0.6rem 0;
+    }
+    .error { color: #b91c1c; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>スピーチ内容に合わせたプロジェクト提案</h1>
+    <p class="muted">projectlist.md を相対パスで読み込み、Path選択 + 20問の回答から最適な3つを提案します。</p>
+
+    <div class="row">
+      <label for="pathSelect"><strong>1) Path を選択</strong></label><br />
+      <select id="pathSelect" disabled>
+        <option>読み込み中...</option>
+      </select>
+      <div id="loadStatus" class="muted"></div>
+    </div>
+
+    <section>
+      <h2>2) 20問アンケート</h2>
+      <div id="questions"></div>
+      <button id="recommendBtn" disabled>3つのプロジェクトを提案する</button>
+      <p id="validation" class="error"></p>
+    </section>
+
+    <section class="results" id="results"></section>
+  </main>
+
+  <script>
+    const questions = [
+      { text: "今回のスピーチで特に強化したいのは？", tags: ["speech","leadership","evaluation","audience"] },
+      { text: "聴衆に与えたい印象は？", tags: ["inspire","humor","story","professional"] },
+      { text: "話し方で改善したい点は？", tags: ["vocal","body language","descriptive","presentation software"] },
+      { text: "準備段階で重視することは？", tags: ["research","writing","purpose","interview"] },
+      { text: "人との関わりで伸ばしたい力は？", tags: ["networking","mentoring","active listening","collaboration"] },
+      { text: "リーダーとして伸ばしたいテーマは？", tags: ["leadership style","ethical","change","projects"] },
+      { text: "発表形式で興味があるものは？", tags: ["podcast","panel","question-and-answer","online meetings"] },
+      { text: "難しい状況への対応で学びたいのは？", tags: ["difficult audience","negotiate","lessons learned","focus on the positive"] },
+      { text: "どんなスピーチにしたいですか？", tags: ["social speeches","story","inspire","humor"] },
+      { text: "資料活用で近い関心は？", tags: ["visual aids","presentation software","blog","social media"] },
+      { text: "プロジェクト推進で学びたい要素は？", tags: ["manage projects","high performance leadership","motivate","public relations"] },
+      { text: "コミュニケーションの軸は？", tags: ["communication style","audience","active listening","vocal"] },
+      { text: "キャリアで役立てたいテーマは？", tags: ["interview","professional","networking","lead in any situation"] },
+      { text: "話の構成で重視したい点は？", tags: ["writing","purpose","research","story"] },
+      { text: "チーム活動で身につけたいことは？", tags: ["collaboration","motivate","volunteer","projects"] },
+      { text: "オンラインで磨きたいスキルは？", tags: ["online meetings","podcast","blog","social media"] },
+      { text: "説得力を高めるために必要なのは？", tags: ["descriptive","vocal","body language","connect with your audience"] },
+      { text: "クラブ外での発表を想定すると？", tags: ["public relations","difficult audience","question-and-answer","professional"] },
+      { text: "自己成長として優先したいのは？", tags: ["reflect on your path","evaluation","ethical","leadership style"] },
+      { text: "最終的に目指すスピーチ像は？", tags: ["inspire","story","professional","humor"] }
+    ];
+
+    const appState = {
+      rows: [],
+      selectedPath: "",
+    };
+
+    function normalize(text) {
+      return text.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+    }
+
+    function parseMarkdownTable(markdown) {
+      const lines = markdown.split("\n").map(line => line.trim()).filter(Boolean);
+      const dataLines = lines.filter(line => line.startsWith("|") && !line.includes("---"));
+      return dataLines.slice(1).map(line => {
+        const cols = line.split("|").map(c => c.trim()).filter(Boolean);
+        return {
+          path: cols[0] || "",
+          project: cols[1] || "",
+          purpose: cols[2] || ""
+        };
+      }).filter(r => r.path && r.project);
+    }
+
+    function buildQuestions() {
+      const box = document.getElementById("questions");
+      box.innerHTML = "";
+      questions.forEach((q, qIdx) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "question";
+        wrapper.innerHTML = `<strong>Q${qIdx + 1}. ${q.text}</strong>`;
+
+        const choices = document.createElement("div");
+        choices.className = "choices";
+
+        q.tags.forEach((tag, tagIdx) => {
+          const id = `q${qIdx}_${tagIdx}`;
+          const label = document.createElement("label");
+          label.innerHTML = `<input type="radio" name="q${qIdx}" value="${tag}"> ${tag}`;
+          choices.appendChild(label);
+        });
+
+        wrapper.appendChild(choices);
+        box.appendChild(wrapper);
+      });
+    }
+
+    function getAnswers() {
+      const answers = [];
+      for (let i = 0; i < questions.length; i++) {
+        const selected = document.querySelector(`input[name="q${i}"]:checked`);
+        if (!selected) return null;
+        answers.push(selected.value);
+      }
+      return answers;
+    }
+
+    function recommendProjects(rows, path, answers) {
+      const answerText = answers.map(normalize);
+      const filtered = rows.filter(r => r.path === path);
+      const scored = filtered.map(item => {
+        const joined = normalize(`${item.project} ${item.purpose}`);
+        let score = 0;
+        answerText.forEach(ans => {
+          if (joined.includes(ans)) score += 3;
+          else {
+            const words = ans.split(" ");
+            words.forEach(w => {
+              if (w.length > 3 && joined.includes(w)) score += 1;
+            });
+          }
+        });
+        return { ...item, score };
+      });
+
+      return scored
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+    }
+
+    async function init() {
+      const pathSelect = document.getElementById("pathSelect");
+      const loadStatus = document.getElementById("loadStatus");
+      const recommendBtn = document.getElementById("recommendBtn");
+      const validation = document.getElementById("validation");
+      const results = document.getElementById("results");
+
+      buildQuestions();
+
+      try {
+        const response = await fetch("./projectlist.md");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const markdown = await response.text();
+        const rows = parseMarkdownTable(markdown);
+        appState.rows = rows;
+
+        const uniquePaths = [...new Set(rows.map(r => r.path))].sort();
+        pathSelect.innerHTML = '<option value="">-- Pathを選択してください --</option>';
+        uniquePaths.forEach(path => {
+          const option = document.createElement("option");
+          option.value = path;
+          option.textContent = path;
+          pathSelect.appendChild(option);
+        });
+
+        pathSelect.disabled = false;
+        recommendBtn.disabled = false;
+        loadStatus.textContent = `${rows.length}件のプロジェクトを読み込み、${uniquePaths.length}種類のPathを抽出しました。`;
+      } catch (e) {
+        loadStatus.innerHTML = `読み込みに失敗しました。<span class="error">${e.message}</span><br>※ ローカルファイルで開くとfetchが失敗する場合があります。HTTPサーバー経由で開いてください。`;
+      }
+
+      pathSelect.addEventListener("change", () => {
+        appState.selectedPath = pathSelect.value;
+      });
+
+      recommendBtn.addEventListener("click", () => {
+        validation.textContent = "";
+        results.innerHTML = "";
+
+        const path = pathSelect.value;
+        if (!path) {
+          validation.textContent = "Pathを選択してください。";
+          return;
+        }
+
+        const answers = getAnswers();
+        if (!answers) {
+          validation.textContent = "20問すべてに回答してください。";
+          return;
+        }
+
+        const top3 = recommendProjects(appState.rows, path, answers);
+
+        const heading = document.createElement("h2");
+        heading.textContent = "提案結果（上位3件）";
+        results.appendChild(heading);
+
+        top3.forEach((item, idx) => {
+          const card = document.createElement("div");
+          card.className = "project";
+          card.innerHTML = `<strong>${idx + 1}. ${item.project}</strong><br><small>Path: ${item.path}</small><p>${item.purpose}</p><small>一致スコア: ${item.score}</small>`;
+          results.appendChild(card);
+        });
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>
