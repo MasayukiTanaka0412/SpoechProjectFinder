@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>スピーチプロジェクト提案</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f5f7fb; color: #1f2937; }
+    .container { max-width: 920px; margin: 2rem auto; background: #fff; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); padding: 1.5rem; }
+    .row { margin: 1rem 0; }
+    select, button { font-size: 1rem; padding: 0.6rem 0.8rem; border-radius: 8px; border: 1px solid #cbd5e1; }
+    button { background: #2563eb; color: #fff; border: none; cursor: pointer; margin-top: 1rem; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    .question { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.9rem; margin: 0.7rem 0; background: #f9fafb; }
+    .choices { display: flex; gap: 1.2rem; margin-top: 0.5rem; }
+    .results { margin-top: 1.5rem; border-top: 1px solid #e5e7eb; padding-top: 1rem; }
+    .project { border: 1px solid #dbeafe; background: #eff6ff; border-radius: 10px; padding: 0.8rem; margin: 0.6rem 0; }
+    .error { color: #b91c1c; font-weight: 600; }
+    .muted { color: #4b5563; }
+    .prompt-box { margin-top: 0.6rem; padding: 0.7rem; background: #fff; border: 1px solid #bfdbfe; border-radius: 8px; white-space: pre-wrap; }
+    .small-btn { background: #1d4ed8; margin-top: 0.4rem; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>スピーチプロジェクト提案</h1>
+    <p class="muted">Path選択 + Yes/No 20問で最適な3つを提案します。</p>
+
+    <div class="row">
+      <label for="pathSelect"><strong>1) Path を選択</strong></label><br />
+      <select id="pathSelect" disabled><option>読み込み中...</option></select>
+      <div id="loadStatus" class="muted"></div>
+    </div>
+
+    <section>
+      <h2>2) Yes/No 20問</h2>
+      <div id="questions"></div>
+      <button id="recommendBtn" disabled>3つのプロジェクトを提案する</button>
+      <p id="validation" class="error"></p>
+    </section>
+
+    <section class="results" id="results"></section>
+  </main>
+
+  <script>
+    const questions = [
+      { text: "聴衆を強く鼓舞したいですか？", yes: ["inspire", "inspiring"], no: ["information", "research"] },
+      { text: "ユーモアを入れたいですか？", yes: ["humor", "humorous"], no: ["professional"] },
+      { text: "ストーリー中心で話したいですか？", yes: ["story", "storytelling"], no: ["structure", "organized"] },
+      { text: "声の抑揚を特に伸ばしたいですか？", yes: ["vocal", "vocal variety"], no: ["body language"] },
+      { text: "ボディランゲージ改善を重視しますか？", yes: ["body language", "nonverbal"], no: ["writing"] },
+      { text: "調査に基づくスピーチを作りたいですか？", yes: ["research", "well researched"], no: ["social speeches"] },
+      { text: "視覚資料やスライドを使いたいですか？", yes: ["visual aids", "slides", "presentation software"], no: ["without slides"] },
+      { text: "質疑応答の進行力を高めたいですか？", yes: ["question and answer", "facilitating"], no: ["prepared speech"] },
+      { text: "オンライン発信（会議/ウェビナー）を強化したいですか？", yes: ["online meeting", "webinar"], no: ["in person"] },
+      { text: "ポッドキャスト形式に関心がありますか？", yes: ["podcast"], no: ["club speech"] },
+      { text: "リーダーシップを重点的に伸ばしたいですか？", yes: ["lead", "leadership"], no: ["communication"] },
+      { text: "チーム運営・プロジェクト管理を学びたいですか？", yes: ["team", "project", "manage"], no: ["individual"] },
+      { text: "メンタリング/コーチングに関心がありますか？", yes: ["mentoring", "coaching"], no: ["self practice"] },
+      { text: "交渉や合意形成の力を高めたいですか？", yes: ["negotiate", "consensus"], no: ["delivery"] },
+      { text: "難しい聴衆への対応を練習したいですか？", yes: ["difficult audience", "audience challenges"], no: ["friendly audience"] },
+      { text: "面接や職業場面に直結する練習をしたいですか？", yes: ["interview", "professionally"], no: ["club only"] },
+      { text: "広報・SNS・ブログ活用を学びたいですか？", yes: ["public relations", "social media", "blog"], no: ["speech delivery"] },
+      { text: "変化対応やコンフリクト対応力を高めたいですか？", yes: ["change", "conflict"], no: ["steady plan"] },
+      { text: "倫理や価値観をテーマに扱いたいですか？", yes: ["ethical", "ethics"], no: ["light topic"] },
+      { text: "自分の成長を振り返る活動を重視しますか？", yes: ["reflect", "feedback"], no: ["new challenge"] }
+    ];
+
+    function normalize(t) { return t.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim(); }
+
+    function parseMarkdownTable(md) {
+      const lines = md.split("\n").map(v => v.trim()).filter(Boolean);
+      const dataLines = lines.filter(v => v.startsWith("|") && !v.includes("---"));
+      return dataLines.slice(1).map(line => {
+        const cols = line.split("|").map(c => c.trim()).filter(Boolean);
+        return { path: cols[0] || "", project: cols[1] || "", purpose: cols[2] || "", purposeJp: cols[3] || "" };
+      }).filter(r => r.path && r.project);
+    }
+
+    function buildQuestions() {
+      const box = document.getElementById("questions");
+      box.innerHTML = "";
+      questions.forEach((q, i) => {
+        const d = document.createElement("div");
+        d.className = "question";
+        d.innerHTML = `<strong>Q${i + 1}. ${q.text}</strong>
+          <div class="choices">
+            <label><input type="radio" name="q${i}" value="yes"> Yes</label>
+            <label><input type="radio" name="q${i}" value="no"> No</label>
+          </div>`;
+        box.appendChild(d);
+      });
+    }
+
+    function getAnswers() {
+      const tags = [];
+      const details = [];
+      for (let i = 0; i < questions.length; i++) {
+        const selected = document.querySelector(`input[name="q${i}"]:checked`);
+        if (!selected) return null;
+        const isYes = selected.value === "yes";
+        tags.push(...(isYes ? questions[i].yes : questions[i].no));
+        details.push({ index: i + 1, question: questions[i].text, answer: isYes ? "Yes" : "No" });
+      }
+      return { tags, details };
+    }
+
+    function recommend(rows, path, tags) {
+      const answerText = tags.map(normalize);
+      return rows.filter(r => r.path === path).map(item => {
+        const joined = normalize(`${item.project} ${item.purpose} ${item.purposeJp}`);
+        let score = 0;
+        answerText.forEach(a => {
+          if (joined.includes(a)) score += 3;
+          else a.split(" ").forEach(w => { if (w.length > 3 && joined.includes(w)) score += 1; });
+        });
+        return { ...item, score };
+      }).sort((a, b) => b.score - a.score).slice(0, 3);
+    }
+
+
+    function buildIdeaPrompt(item, answerDetails) {
+      const answersText = answerDetails.map(a => `Q${a.index}. ${a.question} -> ${a.answer}`).join("\n");
+      return [
+        "あなたはスピーチコーチです。以下の情報をもとに、このプロジェクトに合うスピーチアイデアを5案ください。",
+        "各案には『タイトル』『ねらい』『導入フック』『主な構成(3点)』を含めてください。",
+        "",
+        `Project: ${item.project}`,
+        `Path: ${item.path}`,
+        `Purpose (EN): ${item.purpose}`,
+        `Purpose (JP): ${item.purposeJp || "（未設定）"}`,
+        "",
+        "20問の回答:",
+        answersText
+      ].join("\n");
+    }
+
+    async function init() {
+      const pathSelect = document.getElementById("pathSelect");
+      const status = document.getElementById("loadStatus");
+      const btn = document.getElementById("recommendBtn");
+      const validation = document.getElementById("validation");
+      const results = document.getElementById("results");
+      buildQuestions();
+
+      let rows = [];
+      try {
+        const res = await fetch("./projectlist.md");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        rows = parseMarkdownTable(await res.text());
+        const uniquePaths = [...new Set(rows.map(r => r.path))].sort();
+        pathSelect.innerHTML = '<option value="">-- Pathを選択してください --</option>';
+        uniquePaths.forEach(p => {
+          const o = document.createElement("option"); o.value = p; o.textContent = p; pathSelect.appendChild(o);
+        });
+        pathSelect.disabled = false;
+        btn.disabled = false;
+        status.textContent = `${rows.length}件読み込み、${uniquePaths.length}種類のPathを抽出しました。`;
+      } catch (e) {
+        status.innerHTML = `読み込み失敗: <span class="error">${e.message}</span>`;
+      }
+
+      btn.addEventListener("click", () => {
+        validation.textContent = "";
+        results.innerHTML = "";
+        if (!pathSelect.value) return void (validation.textContent = "Pathを選択してください。");
+        const answerData = getAnswers();
+        if (!answerData) return void (validation.textContent = "20問すべてに回答してください。");
+
+        const top3 = recommend(rows, pathSelect.value, answerData.tags);
+        results.innerHTML = "<h2>提案結果（上位3件）</h2>";
+        top3.forEach((item, i) => {
+          const card = document.createElement("div");
+          card.className = "project";
+          const promptId = `prompt-${i}`;
+          const promptText = buildIdeaPrompt(item, answerData.details);
+          card.innerHTML = `<strong>${i + 1}. ${item.project}</strong><br><small>Path: ${item.path}</small>
+            <p><strong>Purpose (EN):</strong> ${item.purpose}</p>
+            <p><strong>Purpose (JP):</strong> ${item.purposeJp || "（未設定）"}</p>
+            <small>一致スコア: ${item.score}</small><br>
+            <button type="button" class="small-btn" data-prompt-target="${promptId}">このプロジェクトのAIプロンプトを表示</button>
+            <div id="${promptId}" class="prompt-box" hidden></div>`;
+          const btn = card.querySelector('[data-prompt-target]');
+          const box = card.querySelector(`#${promptId}`);
+          btn.addEventListener('click', () => {
+            const isHidden = box.hasAttribute('hidden');
+            if (isHidden) {
+              box.textContent = promptText;
+              box.removeAttribute('hidden');
+              btn.textContent = 'AIプロンプトを隠す';
+            } else {
+              box.setAttribute('hidden', '');
+              btn.textContent = 'このプロジェクトのAIプロンプトを表示';
+            }
+          });
+          results.appendChild(card);
+        });
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>
