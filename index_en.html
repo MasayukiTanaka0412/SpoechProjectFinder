@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Speech Project Recommender</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f5f7fb; color: #1f2937; }
+    .container { max-width: 920px; margin: 2rem auto; background: #fff; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); padding: 1.5rem; }
+    .row { margin: 1rem 0; }
+    select, button { font-size: 1rem; padding: 0.6rem 0.8rem; border-radius: 8px; border: 1px solid #cbd5e1; }
+    button { background: #2563eb; color: #fff; border: none; cursor: pointer; margin-top: 1rem; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    .question { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.9rem; margin: 0.7rem 0; background: #f9fafb; }
+    .choices { display: flex; gap: 1.2rem; margin-top: 0.5rem; }
+    .results { margin-top: 1.5rem; border-top: 1px solid #e5e7eb; padding-top: 1rem; }
+    .project { border: 1px solid #dbeafe; background: #eff6ff; border-radius: 10px; padding: 0.8rem; margin: 0.6rem 0; }
+    .error { color: #b91c1c; font-weight: 600; }
+    .muted { color: #4b5563; }
+    .prompt-box { margin-top: 0.6rem; padding: 0.7rem; background: #fff; border: 1px solid #bfdbfe; border-radius: 8px; white-space: pre-wrap; }
+    .small-btn { background: #1d4ed8; margin-top: 0.4rem; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Speech Project Recommender</h1>
+    <p class="muted">Select a Path and answer 20 Yes/No questions to get the best 3 project recommendations.</p>
+
+    <div class="row">
+      <label for="pathSelect"><strong>1) Select a Path</strong></label><br />
+      <select id="pathSelect" disabled><option>Loading...</option></select>
+      <div id="loadStatus" class="muted"></div>
+    </div>
+
+    <section>
+      <h2>2) 20 Yes/No Questions</h2>
+      <div id="questions"></div>
+      <button id="recommendBtn" disabled>Recommend 3 Projects</button>
+      <p id="validation" class="error"></p>
+    </section>
+
+    <section class="results" id="results"></section>
+  </main>
+
+  <script>
+    const questions = [
+      { text: "Do you want to strongly inspire your audience?", yes: ["inspire", "inspiring"], no: ["information", "research"] },
+      { text: "Do you want to include humor?", yes: ["humor", "humorous"], no: ["professional"] },
+      { text: "Do you want a story-centered speech?", yes: ["story", "storytelling"], no: ["structure", "organized"] },
+      { text: "Do you especially want to improve vocal variety?", yes: ["vocal", "vocal variety"], no: ["body language"] },
+      { text: "Do you prioritize improving body language?", yes: ["body language", "nonverbal"], no: ["writing"] },
+      { text: "Do you want to create a research-based speech?", yes: ["research", "well researched"], no: ["social speeches"] },
+      { text: "Do you want to use visual aids or slides?", yes: ["visual aids", "slides", "presentation software"], no: ["without slides"] },
+      { text: "Do you want to improve facilitation in Q&A sessions?", yes: ["question and answer", "facilitating"], no: ["prepared speech"] },
+      { text: "Do you want to strengthen online delivery (meetings/webinars)?", yes: ["online meeting", "webinar"], no: ["in person"] },
+      { text: "Are you interested in a podcast format?", yes: ["podcast"], no: ["club speech"] },
+      { text: "Do you want to focus on leadership development?", yes: ["lead", "leadership"], no: ["communication"] },
+      { text: "Do you want to learn team management and project management?", yes: ["team", "project", "manage"], no: ["individual"] },
+      { text: "Are you interested in mentoring/coaching?", yes: ["mentoring", "coaching"], no: ["self practice"] },
+      { text: "Do you want to improve negotiation and consensus skills?", yes: ["negotiate", "consensus"], no: ["delivery"] },
+      { text: "Do you want to practice handling difficult audiences?", yes: ["difficult audience", "audience challenges"], no: ["friendly audience"] },
+      { text: "Do you want practice directly tied to interviews/workplace situations?", yes: ["interview", "professionally"], no: ["club only"] },
+      { text: "Do you want to learn PR/SNS/blog usage?", yes: ["public relations", "social media", "blog"], no: ["speech delivery"] },
+      { text: "Do you want to improve change and conflict handling?", yes: ["change", "conflict"], no: ["steady plan"] },
+      { text: "Do you want to address ethics and values themes?", yes: ["ethical", "ethics"], no: ["light topic"] },
+      { text: "Do you value reflection activities for your growth?", yes: ["reflect", "feedback"], no: ["new challenge"] }
+    ];
+
+    function normalize(t) { return t.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim(); }
+
+    function parseMarkdownTable(md) {
+      const lines = md.split("\n").map(v => v.trim()).filter(Boolean);
+      const dataLines = lines.filter(v => v.startsWith("|") && !v.includes("---"));
+      return dataLines.slice(1).map(line => {
+        const cols = line.split("|").map(c => c.trim()).filter(Boolean);
+        return { path: cols[0] || "", project: cols[1] || "", purpose: cols[2] || "", purposeJp: cols[3] || "" };
+      }).filter(r => r.path && r.project);
+    }
+
+    function buildQuestions() {
+      const box = document.getElementById("questions");
+      box.innerHTML = "";
+      questions.forEach((q, i) => {
+        const d = document.createElement("div");
+        d.className = "question";
+        d.innerHTML = `<strong>Q${i + 1}. ${q.text}</strong>
+          <div class="choices">
+            <label><input type="radio" name="q${i}" value="yes"> Yes</label>
+            <label><input type="radio" name="q${i}" value="no"> No</label>
+          </div>`;
+        box.appendChild(d);
+      });
+    }
+
+    function getAnswers() {
+      const tags = [];
+      const details = [];
+      for (let i = 0; i < questions.length; i++) {
+        const selected = document.querySelector(`input[name="q${i}"]:checked`);
+        if (!selected) return null;
+        const isYes = selected.value === "yes";
+        tags.push(...(isYes ? questions[i].yes : questions[i].no));
+        details.push({ index: i + 1, question: questions[i].text, answer: isYes ? "Yes" : "No" });
+      }
+      return { tags, details };
+    }
+
+    function recommend(rows, path, tags) {
+      const answerText = tags.map(normalize);
+      return rows.filter(r => r.path === path).map(item => {
+        const joined = normalize(`${item.project} ${item.purpose} ${item.purposeJp}`);
+        let score = 0;
+        answerText.forEach(a => {
+          if (joined.includes(a)) score += 3;
+          else a.split(" ").forEach(w => { if (w.length > 3 && joined.includes(w)) score += 1; });
+        });
+        return { ...item, score };
+      }).sort((a, b) => b.score - a.score).slice(0, 3);
+    }
+
+    function buildIdeaPrompt(item, answerDetails) {
+      const answersText = answerDetails.map(a => `Q${a.index}. ${a.question} -> ${a.answer}`).join("\n");
+      return [
+        "You are a speech coach. Based on the information below, propose 5 speech ideas that fit this project.",
+        "For each idea, include: Title, Goal, Opening Hook, and Main Structure (3 points).",
+        "",
+        `Project: ${item.project}`,
+        `Path: ${item.path}`,
+        `Purpose (EN): ${item.purpose}`,
+        `Purpose (JP): ${item.purposeJp || "(not set)"}`,
+        "",
+        "Answers to 20 questions:",
+        answersText
+      ].join("\n");
+    }
+
+    async function init() {
+      const pathSelect = document.getElementById("pathSelect");
+      const status = document.getElementById("loadStatus");
+      const btn = document.getElementById("recommendBtn");
+      const validation = document.getElementById("validation");
+      const results = document.getElementById("results");
+      buildQuestions();
+
+      let rows = [];
+      try {
+        const res = await fetch("./projectlist.md");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        rows = parseMarkdownTable(await res.text());
+        const uniquePaths = [...new Set(rows.map(r => r.path))].sort();
+        pathSelect.innerHTML = '<option value="">-- Select a Path --</option>';
+        uniquePaths.forEach(p => {
+          const o = document.createElement("option"); o.value = p; o.textContent = p; pathSelect.appendChild(o);
+        });
+        pathSelect.disabled = false;
+        btn.disabled = false;
+        status.textContent = `Loaded ${rows.length} records and extracted ${uniquePaths.length} unique Paths.`;
+      } catch (e) {
+        status.innerHTML = `Load failed: <span class="error">${e.message}</span>`;
+      }
+
+      btn.addEventListener("click", () => {
+        validation.textContent = "";
+        results.innerHTML = "";
+        if (!pathSelect.value) return void (validation.textContent = "Please select a Path.");
+        const answerData = getAnswers();
+        if (!answerData) return void (validation.textContent = "Please answer all 20 questions.");
+
+        const top3 = recommend(rows, pathSelect.value, answerData.tags);
+        results.innerHTML = "<h2>Recommendations (Top 3)</h2>";
+        top3.forEach((item, i) => {
+          const card = document.createElement("div");
+          card.className = "project";
+          const promptId = `prompt-${i}`;
+          const promptText = buildIdeaPrompt(item, answerData.details);
+          card.innerHTML = `<strong>${i + 1}. ${item.project}</strong><br><small>Path: ${item.path}</small>
+            <p><strong>Purpose (EN):</strong> ${item.purpose}</p>
+            <p><strong>Purpose (JP):</strong> ${item.purposeJp || "(not set)"}</p>
+            <small>Match score: ${item.score}</small><br>
+            <button type="button" class="small-btn" data-prompt-target="${promptId}">Show AI Prompt for This Project</button>
+            <div id="${promptId}" class="prompt-box" hidden></div>`;
+          const promptBtn = card.querySelector('[data-prompt-target]');
+          const box = card.querySelector(`#${promptId}`);
+          promptBtn.addEventListener('click', () => {
+            const isHidden = box.hasAttribute('hidden');
+            if (isHidden) {
+              box.textContent = promptText;
+              box.removeAttribute('hidden');
+              promptBtn.textContent = 'Hide AI Prompt';
+            } else {
+              box.setAttribute('hidden', '');
+              promptBtn.textContent = 'Show AI Prompt for This Project';
+            }
+          });
+          results.appendChild(card);
+        });
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>
